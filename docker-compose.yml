@@ -1,0 +1,130 @@
+services:
+  web:
+    image: jitsi/web:${VERSION:-stable-10655}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+
+      # URL pública (la del dominio que resuelve en tu NPM)
+      PUBLIC_URL: ${SCHEME:-https}://${DOMAIN}
+
+      # TLS lo termina NPM (por eso HTTP interno)
+      ENABLE_LETS_ENCRYPT: "0"
+      DISABLE_HTTPS: "1"
+      ENABLE_HTTP_REDIRECT: "0"
+
+      # Auth (opcional)
+      ENABLE_AUTH: ${ENABLE_AUTH:-0}
+      ENABLE_GUESTS: ${ENABLE_GUESTS:-1}
+      AUTH_TYPE: ${AUTH_TYPE:-internal}
+
+      # Websocket (necesario detrás de reverse proxy)
+      ENABLE_COLIBRI_WEBSOCKET: "1"
+
+      # --- CLAVE: XMPP server interno ---
+      XMPP_SERVER: ${XMPP_SERVER:-xmpp.meet.jitsi}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+
+    ports:
+      # Solo HTTP interno (NPM termina TLS)
+      - "${JITSI_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./config/web:/config
+    depends_on:
+      - prosody
+      - jicofo
+    networks:
+      - internal
+
+  prosody:
+    image: jitsi/prosody:${VERSION:-stable-10655}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+
+      # --- CLAVE: dominios XMPP coherentes ---
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+
+      # Passwords XMPP (obligatorios)
+      JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD}
+      JICOFO_AUTH_PASSWORD: ${JICOFO_AUTH_PASSWORD}
+      JIBRI_XMPP_PASSWORD: ${JIBRI_XMPP_PASSWORD}
+      JIGASI_XMPP_PASSWORD: ${JIGASI_XMPP_PASSWORD}
+      JIBRI_RECORDER_PASSWORD: ${JIBRI_RECORDER_PASSWORD}
+
+    volumes:
+      - ./config/prosody:/config
+    networks:
+      internal:
+        aliases:
+          # Esto arregla tu error: "xmpp.meet.jitsi could not be resolved"
+          - xmpp.meet.jitsi
+
+  jicofo:
+    image: jitsi/jicofo:${VERSION:-stable-10655}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+
+      # --- CLAVE: XMPP server interno ---
+      XMPP_SERVER: ${XMPP_SERVER:-xmpp.meet.jitsi}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+
+      JICOFO_AUTH_PASSWORD: ${JICOFO_AUTH_PASSWORD}
+    volumes:
+      - ./config/jicofo:/config
+    depends_on:
+      - prosody
+    networks:
+      - internal
+
+  jvb:
+    image: jitsi/jvb:${VERSION:-stable-10655}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+
+      # --- CLAVE: XMPP server interno ---
+      XMPP_SERVER: ${XMPP_SERVER:-xmpp.meet.jitsi}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+
+      JVB_PORT: ${JVB_PORT:-10000}
+      JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD}
+      JVB_BREWERY_MUC: ${JVB_BREWERY_MUC:-jvbbrewery}
+      JVB_AUTH_USER: ${JVB_AUTH_USER:-jvb}
+
+      # IMPORTANTÍSIMO: IP pública del VPS donde corre JVB (el de Jitsi)
+      JVB_ADVERTISE_IPS: ${JVB_ADVERTISE_IPS}
+
+      VIDEOBRIDGE_MAX_MEMORY: ${VIDEOBRIDGE_MAX_MEMORY:-2048m}
+    volumes:
+      - ./config/jvb:/config
+    ports:
+      # Media UDP directo a este VPS
+      - "${JVB_PORT:-10000}:${JVB_PORT:-10000}/udp"
+      # Fallback TCP (útil)
+      - "${JVB_TCP_PORT:-4443}:4443/tcp"
+    depends_on:
+      - prosody
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
